@@ -12,63 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import Foundation
 import HomomorphicEncryption
 import RealModule
-import XCTest
+import Testing
 
-/// Validates two expressions are close to each other.
+/// Computes whether `self` is close to another floating-point value.
 ///
-/// Asserts `abs(a-b) <= abs_tol + rel_tol * abs(b))` where `a, b` are the results of evaluating two expressions.
+/// Asserts `abs(self - b) <= abs_tol + rel_tol * abs(b))` where `b` is another floating-point value.
 /// - Parameters:
-///   - expression1: An expression returning floating-point type `T`.
-///   - expression2: An expression returning floating-point type `T`.
+///   - expression: An expression returning finite floating-point value `b.
 ///   - relativeTolerance: An optional relative tolerance to enforce.
 ///   - absoluteTolerance: An optional absolute tolerance to enforce.
-///   - message: An optional description of a failure.
-///   - file: The file where the failure occurs. The default is the filename of the test case where you call this
-/// function.
-///   - line: The line number where the failure occurs. The default is the line number where you call this function.
-package func XCTAssertIsClose<T: BinaryFloatingPoint>(
-    _ expression1: @autoclosure () throws -> T,
-    _ expression2: @autoclosure () throws -> T,
-    relativeTolerance: T = T(1e-5),
-    absoluteTolerance: T = T(1e-8),
-    _ message: @autoclosure () -> String = "",
-    _ file: StaticString = #filePath,
-    _ line: UInt = #line) rethrows
-{
-    let a = try expression1()
-    XCTAssert(a.isFinite)
-    let b = try expression2()
-    XCTAssert(b.isFinite)
-
-    let isClose = abs(a - b) <= absoluteTolerance + relativeTolerance * abs(b)
-    XCTAssert(isClose, "\(a) is not close to \(b). \(message())", file: file, line: line)
-}
-
-/// Asserts that an expression throws a specified error.
-/// - Parameters:
-///   - expression: The expression to evaluate.
-///   - error: The expected thrown error.
-///   - message: An optional description of a failure.
-///   - file: The file where the failure occurs. The default is the filename of the test case where you call this
-/// function.
-///   - line: The line number where the failure occurs. The default is the line number where you call this function.
-package func XCTAssertThrowsError<E: Error & Equatable>(
-    _ expression: @autoclosure () throws -> some Any,
-    error: E,
-    _ message: @autoclosure () -> String = "",
-    file: StaticString = #filePath,
-    line: UInt = #line)
-{
-    XCTAssertThrowsError(try expression(), message(), file: file, line: line) { foundError in
-        XCTAssertEqual(foundError as? E, error, message(), file: file, line: line)
+/// - Returns: true if the expressions are close to each other
+extension BinaryFloatingPoint {
+    @inlinable
+    package func isClose(to value: Self,
+                         relativeTolerance: Self = Self(1e-5),
+                         absoluteTolerance: Self = Self(1e-8)) -> Bool
+    {
+        guard isFinite, value.isFinite else {
+            return false
+        }
+        return abs(self - value) <= absoluteTolerance + relativeTolerance * abs(value)
     }
 }
 
 /// A simple random number generator used for testing.
 ///
 /// This generates an arithmetic sequence by incrementing a UInt64 counter using wrapping arithmetic.
+@usableFromInline
 package struct TestRng: RandomNumberGenerator, PseudoRandomNumberGenerator {
     @usableFromInline var counter: UInt64 = 0
 
@@ -119,11 +92,12 @@ extension [UInt8] {
     }
 }
 
+@usableFromInline
 package enum TestUtils {
     /// A polynomial degree suitable for testing.
-    package static let testPolyDegree = 16
+    @usableFromInline package static let testPolyDegree = 16
     /// A plaintext modulus suitable for testing.
-    package static let testPlaintextModulus = 1153
+    @usableFromInline package static let testPlaintextModulus = 1153
 }
 
 extension TestUtils {
@@ -151,32 +125,42 @@ extension TestUtils {
         return perm(n: n, k: k) / mult(1...k)
     }
 
-    /// Returns the expected number of bins with "count" balls, assuming
-    /// a total of "num_balls" balls each assigned to a uniform random bin
-    /// among "num_bins" bins.
+    /// Count the expected number of bins with a target count, assuming balls each assigned to a uniform random bin.
+    /// - Parameters:
+    ///   - binCount: Number of bins.
+    ///   - ballCount: Number of balls.
+    ///   - count: Target number of balls in a bin.
+    /// - Returns: the expected number of bins with `count` balls.
     package static func expectedBallsInBinsCount(binCount: Int, ballCount: Int, count: Int) -> Double {
         // Pr(ballCount in first bin == count)
         let n = ballCount
         let k = count
         let p = 1 / Double(binCount)
-        let q = 1.0 - p
         let binomialCoefficient = binomialCoefficient(n: n, k: k)
+
+        func binomialPow(_ base: Double, _ exponent: Double) -> Double {
+            // 0^0 set to be 1
+            if base.isZero, exponent.isZero {
+                1.0
+            } else {
+                Double.pow(base, exponent)
+            }
+        }
+
         // Probability mass function of binomial distribution
-        let probabilityOfExactlyCountBallsInFirstBin = binomialCoefficient * Double.pow(p, Double(k)) * Double.pow(
-            q,
-            Double(n - k))
+        let scalingFactor = binomialPow(p, Double(k)) * binomialPow(1.0 - p, Double(n - k))
+        let probabilityOfExactlyCountBallsInFirstBin = binomialCoefficient * scalingFactor
         // Linearity of expectation
         return Double(binCount) * probabilityOfExactlyCountBallsInFirstBin
     }
 
-    package static func getRandomPlaintextData<T: ScalarType>(count: Int,
-                                                              in range: Range<T>) -> [T]
-    {
+    @inlinable
+    package static func getRandomPlaintextData<T: ScalarType>(count: Int, in range: Range<T>) -> [T] {
         (0..<count).map { _ in T.random(in: range) }
     }
 
     package static func uniformnessTest<T>(poly: PolyRq<T, some Any>) {
-        XCTAssert(poly.hasValidData())
+        #expect(poly.hasValidData())
         for (rnsIndex, modulus) in poly.moduli.enumerated() {
             var valueCounts = [T: Int]()
             for coeff in poly.poly(rnsIndex: rnsIndex) {
@@ -194,7 +178,10 @@ extension TestUtils {
                     valueCounts.count { _, value in value == binCount }
                 }
 
-                XCTAssertIsClose(expectedCount, Double(observedCount), relativeTolerance: 0.2, absoluteTolerance: 11.0)
+                #expect(expectedCount.isClose(
+                    to: Double(observedCount),
+                    relativeTolerance: 0.2,
+                    absoluteTolerance: 11.0))
             }
         }
     }
@@ -242,10 +229,10 @@ extension TestUtils {
     }
 
     package static func centeredBinomialDistributionTest<T>(poly: PolyRq<T, some Any>) {
-        XCTAssert(poly.hasValidData())
+        #expect(poly.hasValidData())
         let variance = computeVariance(poly: poly)
         let bounds = 9.0..<12.0
-        XCTAssert(bounds.contains(variance), "variance \(variance) not in bounds \(bounds)")
+        #expect(bounds.contains(variance), "variance \(variance) not in bounds \(bounds)")
 
         // absolute value should be small
         let absoluteValueBound = Int64(18)
@@ -266,17 +253,17 @@ extension TestUtils {
                 valueCounts[bigint, default: 0] += 1
                 sum += bigint
             } else {
-                XCTFail("RNS coefficient too large: \(crtForm)")
+                Issue.record("RNS coefficient too large: \(crtForm)")
             }
         }
 
         // Check distribution is zero-mean
         let mean = Double(sum) / Double(poly.degree)
-        XCTAssertLessThan(abs(mean), 0.2)
+        #expect(abs(mean) < 0.2)
     }
 
     package static func ternaryDistributionTest(poly: PolyRq<some Any, some Any>, pValue: Double) {
-        XCTAssert(poly.hasValidData())
+        #expect(poly.hasValidData())
         // Maps {-1, 0, 1} to coefficient count
         var valueCounts = [Int: Int]()
 
@@ -290,7 +277,7 @@ extension TestUtils {
             case crtMinusOne: valueCounts[-1, default: 0] += 1
             case crtZero: valueCounts[0, default: 0] += 1
             case crtOne: valueCounts[1, default: 0] += 1
-            default: XCTFail("Invalid value in polynomial, residues: \(crt)")
+            default: Issue.record("Invalid value in polynomial, residues: \(crt)")
             }
         }
 
@@ -306,11 +293,12 @@ extension TestUtils {
         // F(x; 2) = 1 - e^(-x / 2)
         // observeved P-value = 1 - F(x; 2) => observed P-value = e^(-x / 2)
         let observedPValue = Double.exp(-chiSquareStat / 2)
-        XCTAssertGreaterThan(observedPValue, pValue)
+        #expect(observedPValue > pValue)
     }
 }
 
 extension TestUtils {
+    @inlinable
     package static func testCoefficientModuli<T: ScalarType>(_: T.Type) throws -> [T] {
         if T.self == UInt32.self {
             return try T.generatePrimes(
@@ -327,6 +315,7 @@ extension TestUtils {
         preconditionFailure("Unsupported scalar type \(T.self)")
     }
 
+    @inlinable
     package static func getTestEncryptionParameters<Scheme: HeScheme>() throws -> EncryptionParameters<Scheme> {
         try EncryptionParameters<Scheme>(
             polyDegree: testPolyDegree,
@@ -336,6 +325,7 @@ extension TestUtils {
             securityLevel: SecurityLevel.unchecked)
     }
 
+    @inlinable
     package static func getTestContext<Scheme: HeScheme>() throws -> Context<Scheme> {
         try Context<Scheme>(encryptionParameters: getTestEncryptionParameters())
     }

@@ -93,7 +93,7 @@ To use the `HomomorphicEncryption` library, add
 to your target's dependencies.
 
 > [!IMPORTANT]
-> When linking your executable, make sure to enable `cross-module-optimization`.
+> When linking your executable, make sure to set `-cross-module-optimization`.
 > Without this flag, performance of Swift Homomorphic Encryption degrades dramatically,
 > due to failure to specialize generics. For example,
 > ```swift
@@ -147,14 +147,17 @@ Future minor versions of the package may introduce changes to these rules as nee
 
 We'd like this package to quickly embrace Swift language and toolchain improvements that are relevant to its mandate. Accordingly, from time to time, we expect that new versions of this package will require clients to upgrade to a more recent Swift toolchain release. Requiring a new Swift release will only require a minor version bump.
 
+> [!WARNING]
+> Any symbol beginning with an underscore, and any product beginning with an underscore, is not subject to semantic versioning: these APIs may change without warning.
+
 ## Developing Swift Homomorphic Encryption
 ### Dependencies
 Developing Swift Homomorphic Encryption requires:
-* [Nick Lockwood SwiftFormat](https://github.com/nicklockwood/SwiftFormat), 0.54.6
+* [Nick Lockwood SwiftFormat](https://github.com/nicklockwood/SwiftFormat), 0.55.5
 * [pre-commit](https://pre-commit.com)
 * [swift-format](https://github.com/swiftlang/swift-format), 600.0.0
-* [swift-protobuf](https://github.com/apple/swift-protobuf), 1.28.1
-* [SwiftLint](https://github.com/realm/SwiftLint), 0.57.0
+* [swift-protobuf](https://github.com/apple/swift-protobuf), 1.29.0
+* [SwiftLint](https://github.com/realm/SwiftLint), 0.58.2
 
 ### Building
 You can build Swift Homomorphic Encryption either via Xcode or via command line in a terminal.
@@ -202,17 +205,18 @@ swift package experimental-install -c release --product PIRProcessDatabase
 ### Testing
 Run unit tests via
 ```sh
-swift test -c release --parallel
+swift test -c release
 ```
 To run tests in debug mode, run
 ```sh
-swift test --parallel
+swift test
 ```
 > [!WARNING]
 > Tests will be slow in debug mode.
 
 ### Benchmarking
 Swift homomorphic encryption uses [Benchmark](https://github.com/ordo-one/package-benchmark) for benchmarking.
+To enable benchmarking, set the environment variable `SWIFT_HOMOMORPHIC_ENCRYPTION_ENABLE_BENCHMARKING=1`.
 By default, benchmarking requires the [jemalloc](http://jemalloc.net) dependency.
 
 > [!WARNING]
@@ -221,11 +225,12 @@ By default, benchmarking requires the [jemalloc](http://jemalloc.net) dependency
 
 Two ways to run the benchmarks are:
 * Xcode
-  * Open the `swift-homomorphic-encryption` folder in Xcode.
+  * Open the `swift-homomorphic-encryption` folder in Xcode with `SWIFT_HOMOMORPHIC_ENCRYPTION_ENABLE_BENCHMARKING=1` set, e.g.:
+    * `open --env SWIFT_HOMOMORPHIC_ENCRYPTION_ENABLE_BENCHMARKING=1 Package.swift`
   * Switch to a benchmark target.
   * Run the target, e.g., via the `Product` menu.
 * Command line
-  * Run `swift package benchmark`.
+  * Run `SWIFT_HOMOMORPHIC_ENCRYPTION_ENABLE_BENCHMARKING=1 swift package benchmark`.
   * See the [Benchmark](https://github.com/ordo-one/package-benchmark) documentation for more information on running benchmarks.
 
 ### Contributing

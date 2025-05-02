@@ -57,7 +57,8 @@ extension [UInt8] {
     }
 }
 
-@main
+// This executable is used in tests, which breaks `swift test -c release` when used with `@main`.
+// So we avoid using `@main` here.
 struct GenerateDatabaseCommand: ParsableCommand {
     static let configuration: CommandConfiguration = .init(
         commandName: "PIRGenerateDatabase", version: Version.current.description)
@@ -90,10 +91,12 @@ struct GenerateDatabaseCommand: ParsableCommand {
                     value = [UInt8](randomByteCount: valueSize)
                 case .repeated:
                     let repeatCount = valueSize.dividingCeil(keyword.count, variableTime: true)
-                    value = Array([[UInt8]](repeating: keyword, count: repeatCount).flatMap { $0 }.prefix(valueSize))
+                    value = Array([[UInt8]](repeating: keyword, count: repeatCount).flatMap(\.self).prefix(valueSize))
                 }
                 return KeywordValuePair(keyword: keyword, value: value)
             }
         try databaseRows.proto().save(to: outputDatabase)
     }
 }
+
+GenerateDatabaseCommand.main()

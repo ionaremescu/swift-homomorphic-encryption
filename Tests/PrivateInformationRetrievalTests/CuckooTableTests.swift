@@ -1,4 +1,4 @@
-// Copyright 2024 Apple Inc. and the Swift Homomorphic Encryption project authors
+// Copyright 2024-2025 Apple Inc. and the Swift Homomorphic Encryption project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import _TestUtilities
 @testable import PrivateInformationRetrieval
-import TestUtilities
-import XCTest
+import Testing
 
-class CuckooTableTests: XCTestCase {
-    func testCuckooTableEntries() throws {
+@Suite
+struct CuckooTableTests {
+    @Test
+    func cuckooTableEntries() throws {
         let valueSize = 100
-        let testDatabase = PirTestUtils.getTestTable(
+        let testDatabase = PirTestUtils.randomKeywordPirDatabase(
             rowCount: 1000,
             valueSize: valueSize)
         let config = try PirTestUtils.testCuckooTableConfig(maxSerializedBucketSize: 4 * valueSize)
 
         let cuckooTable = try CuckooTable(config: config, database: testDatabase)
-        XCTAssertEqual(cuckooTable.entryCount, testDatabase.count)
+        #expect(cuckooTable.entryCount == testDatabase.count)
 
         for entry in testDatabase {
             let indices = HashKeyword.hashIndices(
@@ -37,36 +39,38 @@ class CuckooTableTests: XCTestCase {
                 let tableEntries = cuckooTable.buckets[cuckooTable.index(tableIndex: tableIndex, index: hashIndex)]
                 for tableEntry in tableEntries {
                     if foundEntry {
-                        XCTAssertNotEqual(tableEntry.keyword, entry.keyword)
+                        #expect(tableEntry.keyword != entry.keyword)
                     } else {
                         if tableEntry.keyword == entry.keyword {
-                            XCTAssertEqual(tableEntry.value, entry.value)
+                            #expect(tableEntry.value == entry.value)
                             foundEntry = true
                         }
                     }
                 }
             }
-            XCTAssert(foundEntry)
-            XCTAssertEqual(cuckooTable[entry.keyword], entry.value)
+            #expect(foundEntry)
+            #expect(cuckooTable[entry.keyword] == entry.value)
         }
     }
 
-    func testReproduceCuckooTable() throws {
+    @Test
+    func reproduceCuckooTable() throws {
         let valueSize = 10
-        let testDatabase = PirTestUtils.getTestTable(rowCount: 1000, valueSize: valueSize)
+        let testDatabase = PirTestUtils.randomKeywordPirDatabase(rowCount: 1000, valueSize: valueSize)
         let config = try PirTestUtils.testCuckooTableConfig(maxSerializedBucketSize: valueSize * 5)
-        let rng1 = TestUtilities.TestRng(counter: 0)
-        let rng2 = TestUtilities.TestRng(counter: 0)
+        let rng1 = TestRng(counter: 0)
+        let rng2 = TestRng(counter: 0)
 
         let cuckooTable1 = try CuckooTable(config: config, database: testDatabase, using: rng1)
         let cuckooTable2 = try CuckooTable(config: config, database: testDatabase, using: rng2)
-        XCTAssertEqual(try cuckooTable1.serializeBuckets(), try cuckooTable2.serializeBuckets())
+        #expect(try cuckooTable1.serializeBuckets() == cuckooTable2.serializeBuckets())
     }
 
-    func testSummarize() throws {
-        var rng = TestUtilities.TestRng(counter: 1)
+    @Test
+    func summarize() throws {
+        var rng = TestRng(counter: 1)
         let valueSize = 10
-        let testDatabase = PirTestUtils.getTestTable(rowCount: 100, valueSize: valueSize, using: &rng)
+        let testDatabase = PirTestUtils.randomKeywordPirDatabase(rowCount: 100, valueSize: valueSize, using: &rng)
 
         let config = try CuckooTableConfig(
             hashFunctionCount: 2,
@@ -83,28 +87,32 @@ class CuckooTableTests: XCTestCase {
             bucketCount: 80,
             emptyBucketCount: 19,
             loadFactor: 0.52)
-        XCTAssertEqual(try cuckooTable.summarize(), summary)
+        #expect(try cuckooTable.summarize() == summary)
     }
 
-    func testCuckooTableLargestSerializedBucketSize() throws {
+    @Test
+    func cuckooTableLargestSerializedBucketSize() throws {
         let valueSize = 10
-        let testDatabase = PirTestUtils.getTestTable(rowCount: 1000, valueSize: valueSize)
-        let config = try PirTestUtils.testCuckooTableConfig(maxSerializedBucketSize: valueSize * 5)
-        let rng = TestUtilities.TestRng(counter: 0)
+        let testDatabase = PirTestUtils.randomKeywordPirDatabase(rowCount: 1000, valueSize: valueSize)
+        let config = try CuckooTableConfig(
+            hashFunctionCount: 2,
+            maxEvictionCount: 20,
+            maxSerializedBucketSize: 5 * valueSize,
+            bucketCount: .allowExpansion(expansionFactor: 1.1, targetLoadFactor: 0.9))
+        let rng = TestRng(counter: 0)
         let cuckooTable = try CuckooTable(config: config, database: testDatabase, using: rng)
 
         let maxSerializedBucketSize = try cuckooTable.maxSerializedBucketSize()
-        XCTAssertLessThanOrEqual(
-            try cuckooTable.serializeBuckets().count,
-            maxSerializedBucketSize * cuckooTable.buckets.count)
+        #expect(try cuckooTable.serializeBuckets().count <= maxSerializedBucketSize * cuckooTable.buckets.count)
 
         let bucketSizes = try cuckooTable.buckets.map { bucket in try bucket.serializedSize() }
-        XCTAssert(bucketSizes.contains(maxSerializedBucketSize))
+        #expect(bucketSizes.contains(maxSerializedBucketSize))
     }
 
-    func testCuckooTableFixedSize() throws {
-        var rng = TestUtilities.TestRng(counter: 0)
-        let testDatabase = PirTestUtils.getTestTable(rowCount: 100, valueSize: 10, using: &rng)
+    @Test
+    func cuckooTableFixedSize() throws {
+        var rng = TestRng(counter: 0)
+        let testDatabase = PirTestUtils.randomKeywordPirDatabase(rowCount: 100, valueSize: 10, using: &rng)
         let maxSerializedBucketSize = 50
         let cuckooConfig = try {
             // use a smaller load factor, to ensure the fixed size is possible
@@ -114,36 +122,36 @@ class CuckooTableTests: XCTestCase {
                                                bucketCount:
                                                .allowExpansion(expansionFactor: 1.1, targetLoadFactor: 0.5))
             let cuckooTable = try CuckooTable(config: config, database: testDatabase, using: rng)
-            return try config
-                .freezingTableSize(
-                    maxSerializedBucketSize: cuckooTable.maxSerializedBucketSize(),
-                    bucketCount: cuckooTable.buckets.count)
+            return try config.freezingTableSize(
+                maxSerializedBucketSize: cuckooTable.maxSerializedBucketSize(),
+                bucketCount: cuckooTable.buckets.count)
         }()
         let cuckooTable = try CuckooTable(config: cuckooConfig, database: testDatabase, using: rng)
-        XCTAssertLessThanOrEqual(try cuckooTable.maxSerializedBucketSize(), maxSerializedBucketSize)
+        #expect(try cuckooTable.maxSerializedBucketSize() <= maxSerializedBucketSize)
         switch cuckooConfig.bucketCount {
         case let .fixedSize(bucketCount: bucketCount):
-            XCTAssertEqual(cuckooTable.buckets.count, bucketCount)
+            #expect(cuckooTable.buckets.count == bucketCount)
         default:
-            XCTFail("Cuckoo config was not fixed size")
+            Issue.record("Cuckoo config was not fixed size")
         }
     }
 
-    func testCuckooTableSmallSlotCount() throws {
+    @Test
+    func cuckooTableSmallSlotCount() throws {
         let valueSize = 10
         let slotCount = 7
-        let testDatabase = PirTestUtils.getTestTable(rowCount: 1000, valueSize: valueSize)
+        let testDatabase = PirTestUtils.randomKeywordPirDatabase(rowCount: 1000, valueSize: valueSize)
         let config = try CuckooTableConfig(
             hashFunctionCount: 2,
             maxEvictionCount: 100,
             maxSerializedBucketSize: 5000, // large value to limit based on number of slots
             bucketCount: .allowExpansion(expansionFactor: 1.1, targetLoadFactor: 0.9),
             slotCount: slotCount)
-        let rng = TestUtilities.TestRng(counter: 0)
+        let rng = TestRng(counter: 0)
 
         let cuckooTable = try CuckooTable(config: config, database: testDatabase, using: rng)
         for bucket in cuckooTable.buckets {
-            XCTAssertLessThanOrEqual(bucket.slots.count, slotCount)
+            #expect(bucket.slots.count <= slotCount)
         }
     }
 }

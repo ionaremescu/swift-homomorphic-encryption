@@ -341,7 +341,8 @@ struct ResolvedArguments: CustomStringConvertible, Encodable {
     }
 }
 
-@main
+// This executable is used in tests, which breaks `swift test -c release` when used with `@main`.
+// So we avoid using `@main` here.
 struct ProcessDatabase: AsyncParsableCommand {
     static let configuration: CommandConfiguration = .init(
         commandName: "PIRProcessDatabase", version: Version.current.description)
@@ -539,7 +540,7 @@ extension ProcessKeywordDatabase.ShardValidationResult {
             label: "keys"
         )
         descriptionDict["response size"] = try sizeString(byteCount: response.size(),
-                                                          count: response.ciphertexts.flatMap { $0 }.count,
+                                                          count: response.ciphertexts.flatMap(\.self).count,
                                                           label: "ciphertexts")
         descriptionDict["noise budget"] = String(format: "%.01f", noiseBudget)
 
@@ -564,3 +565,13 @@ extension Duration {
         Double(components.seconds) * 1e3 + Double(components.attoseconds) * 1e-15
     }
 }
+
+// workaround to call the async main, but without using a top-level `await` to not break `swift test -c release`.
+let group = DispatchGroup()
+group.enter()
+let task = Task.detached(priority: .userInitiated) {
+    defer { group.leave() }
+    await ProcessDatabase.main()
+}
+
+group.wait()

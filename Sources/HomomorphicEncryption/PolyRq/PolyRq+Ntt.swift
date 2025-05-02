@@ -1,4 +1,4 @@
-// Copyright 2024 Apple Inc. and the Swift Homomorphic Encryption project authors
+// Copyright 2024-2025 Apple Inc. and the Swift Homomorphic Encryption project authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -109,9 +109,12 @@ extension ScalarType {
 struct NttContext<T: ScalarType>: Sendable {
     @usableFromInline let rootOfUnityPowers: MultiplyConstantArrayModulus<T>
     @usableFromInline let inverseRootOfUnityPowers: MultiplyConstantArrayModulus<T>
-    @usableFromInline let inverseDegree: MultiplyConstantModulus<T> // degree^{-1} mod modulus
-    // (degree)^{-1} * w^{-N} mod modulus for `w` a root of unity mod modulus
+    /// `degree^{-1} mod modulus`.
+    @usableFromInline let inverseDegree: MultiplyConstantModulus<T>
+    /// `(degree)^{-1} * w^{-N} mod modulus` for `w` a root of unity mod modulus.
     @usableFromInline let inverseDegreeRootOfUnity: MultiplyConstantModulus<T>
+    @usableFromInline let degree: Int
+    @usableFromInline let modulus: T
 
     @inlinable
     init(degree: Int, modulus: T) throws {
@@ -134,6 +137,9 @@ struct NttContext<T: ScalarType>: Sendable {
                 inverseRootOfUnityPowers[previousIdx])
             previousIdx = reverseIdx
         }
+
+        self.degree = degree
+        self.modulus = modulus
         self.rootOfUnityPowers = MultiplyConstantArrayModulus(
             multiplicands: rootOfUnityPowers,
             modulus: modulus,
@@ -294,8 +300,8 @@ extension PolyContext {
             let timeToReduce = lazyReductionCounter > maxLazyReductionCounter
             if timeToReduce {
                 if t == 1 {
-                    // if lazyReductionCounter == 3, `subtractIfExceeds(twiceModulus)`
-                    // only ensures `x in [0, 2 * p - 1]`
+                    // if lazyReductionCounter == 3, `x.subtractIfExceeds(twiceModulus)`
+                    // only ensures `x in [0, twiceModulus - 1]`
                     lazyReductionCounter = max(lazyReductionCounter - 2, 2)
                 } else {
                     lazyReductionCounter = 1

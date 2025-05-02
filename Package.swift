@@ -15,6 +15,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+import Foundation
 import PackageDescription
 
 let librarySettings: [SwiftSetting] = []
@@ -50,6 +52,7 @@ let package = Package(
         .library(
             name: "PrivateNearestNeighborSearchProtobuf",
             targets: ["PrivateNearestNeighborSearchProtobuf"]),
+        .library(name: "_TestUtilities", targets: ["_TestUtilities"]),
         .executable(name: "PIRGenerateDatabase", targets: ["PIRGenerateDatabase"]),
         .executable(name: "PIRProcessDatabase", targets: ["PIRProcessDatabase"]),
         .executable(name: "PIRShardDatabase", targets: ["PIRShardDatabase"]),
@@ -62,7 +65,7 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-crypto.git", from: "3.10.0"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.0.0"),
         .package(url: "https://github.com/apple/swift-numerics", from: "1.0.0"),
-        .package(url: "https://github.com/apple/swift-protobuf", from: "1.28.1"), // Keep version in sync with README
+        .package(url: "https://github.com/apple/swift-protobuf", from: "1.29.0"), // Keep version in sync with README
         .package(url: "https://github.com/swiftlang/swift-docc-plugin", from: "1.1.0"),
     ],
     targets: [
@@ -122,11 +125,14 @@ let package = Package(
             exclude: ["generated/README.md", "protobuf_module_mappings.txtpb"],
             swiftSettings: librarySettings),
         .target(
-            name: "TestUtilities",
+            name: "_TestUtilities",
             dependencies: [
                 "HomomorphicEncryption",
+                "PrivateInformationRetrieval",
+                "PrivateNearestNeighborSearch",
                 .product(name: "Numerics", package: "swift-numerics"),
             ],
+            path: "Sources/TestUtilities",
             swiftSettings: librarySettings),
         .executableTarget(
             name: "PIRGenerateDatabase",
@@ -175,7 +181,7 @@ let package = Package(
         .testTarget(
             name: "HomomorphicEncryptionTests",
             dependencies: [
-                "HomomorphicEncryption", "TestUtilities",
+                "HomomorphicEncryption", "_TestUtilities",
                 .product(name: "Numerics", package: "swift-numerics"),
             ], swiftSettings: executableSettings),
         .testTarget(
@@ -183,22 +189,22 @@ let package = Package(
             dependencies: [
                 "HomomorphicEncryption",
                 "HomomorphicEncryptionProtobuf",
-                "TestUtilities",
+                "_TestUtilities",
             ], swiftSettings: executableSettings),
         .testTarget(
             name: "PIRGenerateDatabaseTests",
             dependencies: ["PIRGenerateDatabase",
-                           "TestUtilities",
+                           "_TestUtilities",
                            .product(name: "Numerics", package: "swift-numerics")], swiftSettings: executableSettings),
         .testTarget(
             name: "PIRProcessDatabaseTests",
             dependencies: ["PIRProcessDatabase",
-                           "TestUtilities",
+                           "_TestUtilities",
                            .product(name: "Numerics", package: "swift-numerics")], swiftSettings: executableSettings),
         .testTarget(
             name: "PrivateInformationRetrievalTests",
             dependencies: [
-                "PrivateInformationRetrieval", "TestUtilities",
+                "PrivateInformationRetrieval", "_TestUtilities",
                 .product(name: "Numerics", package: "swift-numerics"),
             ], swiftSettings: executableSettings),
         .testTarget(
@@ -206,12 +212,12 @@ let package = Package(
             dependencies: [
                 "PrivateInformationRetrieval",
                 "PrivateInformationRetrievalProtobuf",
-                "TestUtilities",
+                "_TestUtilities",
             ], swiftSettings: executableSettings),
         .testTarget(
             name: "PrivateNearestNeighborSearchTests",
             dependencies: [
-                "PrivateNearestNeighborSearch", "HomomorphicEncryption", "TestUtilities",
+                "PrivateNearestNeighborSearch", "HomomorphicEncryption", "_TestUtilities",
             ], swiftSettings: executableSettings),
         .testTarget(
             name: "PrivateNearestNeighborSearchProtobufTests",
@@ -223,61 +229,82 @@ let package = Package(
 
 // MARK: - Benchmarks
 
-package.dependencies += [
-    .package(url: "https://github.com/ordo-one/package-benchmark", .upToNextMajor(from: "1.4.0")),
-]
-package.targets += [
-    .executableTarget(
-        name: "PolyBenchmark",
-        dependencies: [
-            .product(name: "Benchmark", package: "package-benchmark"),
-            "HomomorphicEncryption",
-        ],
-        path: "Benchmarks/PolyBenchmark",
-        swiftSettings: benchmarkSettings,
-        plugins: [
-            .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
-        ]),
-    .executableTarget(
-        name: "RlweBenchmark",
-        dependencies: [
-            .product(name: "Benchmark", package: "package-benchmark"),
-            "HomomorphicEncryption",
-        ],
-        path: "Benchmarks/RlweBenchmark",
-        swiftSettings: benchmarkSettings,
-        plugins: [
-            .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
-        ]),
-    .executableTarget(
-        name: "PIRBenchmark",
-        dependencies: [
-            .product(name: "Benchmark", package: "package-benchmark"),
-            "HomomorphicEncryption",
-            "HomomorphicEncryptionProtobuf",
-            "PrivateInformationRetrieval",
-            "PrivateInformationRetrievalProtobuf",
-        ],
-        path: "Benchmarks/PrivateInformationRetrievalBenchmark",
-        swiftSettings: benchmarkSettings,
-        plugins: [
-            .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
-        ]),
-    .executableTarget(
-        name: "PNNSBenchmark",
-        dependencies: [
-            .product(name: "Benchmark", package: "package-benchmark"),
-            "HomomorphicEncryption",
-            "HomomorphicEncryptionProtobuf",
-            "PrivateNearestNeighborSearch",
-            "PrivateNearestNeighborSearchProtobuf",
-        ],
-        path: "Benchmarks/PrivateNearestNeighborSearchBenchmark",
-        swiftSettings: benchmarkSettings,
-        plugins: [
-            .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
-        ]),
-]
+var enableBenchmarking: Bool {
+    let benchmarkFlags = "SWIFT_HOMOMORPHIC_ENCRYPTION_ENABLE_BENCHMARKING"
+    if let flag = ProcessInfo.processInfo.environment[benchmarkFlags], flag == "1" {
+        return true
+    }
+    return false
+}
+
+if enableBenchmarking {
+    print("Enabling benchmarking")
+    package.dependencies += [
+        .package(url: "https://github.com/ordo-one/package-benchmark", .upToNextMajor(from: "1.4.0")),
+    ]
+    package.products += [.library(name: "_BenchmarkUtilities", targets: ["_BenchmarkUtilities"])]
+    package.targets += [
+        .target(
+            name: "_BenchmarkUtilities",
+            dependencies: [
+                .product(name: "Benchmark", package: "package-benchmark"),
+                "HomomorphicEncryption",
+                "HomomorphicEncryptionProtobuf",
+                "PrivateInformationRetrieval",
+                "PrivateInformationRetrievalProtobuf",
+                "PrivateNearestNeighborSearch",
+                "PrivateNearestNeighborSearchProtobuf",
+            ],
+            path: "Sources/BenchmarkUtilities",
+            swiftSettings: benchmarkSettings),
+        .executableTarget(
+            name: "PolyBenchmark",
+            dependencies: [
+                .product(name: "Benchmark", package: "package-benchmark"),
+                "HomomorphicEncryption",
+            ],
+            path: "Benchmarks/PolyBenchmark",
+            swiftSettings: benchmarkSettings,
+            plugins: [
+                .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
+            ]),
+        .executableTarget(
+            name: "RlweBenchmark",
+            dependencies: [
+                .product(name: "Benchmark", package: "package-benchmark"),
+                "HomomorphicEncryption",
+            ],
+            path: "Benchmarks/RlweBenchmark",
+            swiftSettings: benchmarkSettings,
+            plugins: [
+                .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
+            ]),
+        .executableTarget(
+            name: "PIRBenchmark",
+            dependencies: [
+                .product(name: "Benchmark", package: "package-benchmark"),
+                "HomomorphicEncryption",
+                "_BenchmarkUtilities",
+            ],
+            path: "Benchmarks/PrivateInformationRetrievalBenchmark",
+            swiftSettings: benchmarkSettings,
+            plugins: [
+                .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
+            ]),
+        .executableTarget(
+            name: "PNNSBenchmark",
+            dependencies: [
+                .product(name: "Benchmark", package: "package-benchmark"),
+                "HomomorphicEncryption",
+                "_BenchmarkUtilities",
+            ],
+            path: "Benchmarks/PrivateNearestNeighborSearchBenchmark",
+            swiftSettings: benchmarkSettings,
+            plugins: [
+                .plugin(name: "BenchmarkPlugin", package: "package-benchmark"),
+            ]),
+    ]
+}
 
 // Set the minimum macOS version for the package
 #if canImport(Darwin)

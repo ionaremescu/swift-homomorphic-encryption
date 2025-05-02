@@ -14,7 +14,7 @@
 
 // Benchmarks for Rlwe functions.
 // These benchmarks can be triggered with
-// swift package benchmark --target RlweBenchmark
+// SWIFT_HOMOMORPHIC_ENCRYPTION_ENABLE_BENCHMARKING=1 swift package benchmark --target RlweBenchmark
 
 import Benchmark
 import HomomorphicEncryption
@@ -31,18 +31,14 @@ func benchmark<Scheme: HeScheme>(_ name: String, _: Scheme.Type, body: @escaping
 
 func getModuliForBenchmark<T: ScalarType>(_: T.Type) -> [T] {
     switch T.self {
-    case is UInt32.Type: return [(1 << 27) - 360_447, (1 << 28) - 65535, (1 << 28) - 163_839]
-    case is UInt64.Type: return [(1 << 55) - 311_295, (1 << 55) - 1_392_639, (1 << 55) - 1_507_327]
+    case is UInt32.Type: [(1 << 27) - 360_447, (1 << 28) - 65535, (1 << 28) - 163_839]
+    case is UInt64.Type: [(1 << 55) - 311_295, (1 << 55) - 1_392_639, (1 << 55) - 1_507_327]
     default: preconditionFailure("Unsupported scalar type \(T.self)")
     }
 }
 
-func getRandomPlaintextData<T: ScalarType>(count: Int,
-                                           in range: Range<T>) -> [T]
-{
-    (0..<count).map { _ in
-        T.random(in: range)
-    }
+func getRandomPlaintextData<T: ScalarType>(count: Int, in range: Range<T>) -> [T] {
+    (0..<count).map { _ in T.random(in: range) }
 }
 
 struct RlweBenchmarkContext<Scheme: HeScheme>: Sendable {
@@ -50,6 +46,7 @@ struct RlweBenchmarkContext<Scheme: HeScheme>: Sendable {
     var context: Context<Scheme>
 
     let data: [Scheme.Scalar]
+    let signedData: [Scheme.SignedScalar]
     let coeffPlaintext: Plaintext<Scheme, Coeff>
     let evalPlaintext: Plaintext<Scheme, Eval>
     let ciphertext: Ciphertext<Scheme, Scheme.CanonicalCiphertextFormat>
@@ -85,6 +82,9 @@ struct RlweBenchmarkContext<Scheme: HeScheme>: Sendable {
         self.serializedEvaluationKey = evaluationKey.serialize()
 
         self.data = getRandomPlaintextData(count: polyDegree, in: 0..<Scheme.Scalar(plaintextModulus))
+        self.signedData = data.map { value in
+            value.remainderToCentered(modulus: plaintextModulus)
+        }
         self.coeffPlaintext = try context.encode(values: data, format: .simd)
         self.evalPlaintext = try coeffPlaintext.convertToEvalFormat()
         self.ciphertext = try coeffPlaintext.encrypt(using: secretKey)
@@ -116,6 +116,59 @@ enum StaticRlweBenchmarkContext {
     }
 }
 
+struct EncryptionParametersConfig {
+    let polyDegree: Int
+    let plaintextModulusBits: [Int]
+    let coefficientModulusBits: [Int]
+}
+
+extension EncryptionParametersConfig: CustomStringConvertible {
+    var description: String {
+        "N=\(polyDegree)/logt=\(plaintextModulusBits)/logq=\(coefficientModulusBits.description)"
+    }
+}
+
+extension EncryptionParameters {
+    init(config: EncryptionParametersConfig) throws {
+        let plaintextModuli = try Scheme.Scalar.generatePrimes(
+            significantBitCounts: config.plaintextModulusBits,
+            preferringSmall: true,
+            nttDegree: config.polyDegree)
+        let coefficientModuli = try Scheme.Scalar.generatePrimes(
+            significantBitCounts: config.coefficientModulusBits,
+            preferringSmall: false,
+            nttDegree: config.polyDegree)
+        self = try EncryptionParameters<Scheme>(
+            polyDegree: config.polyDegree,
+            plaintextModulus: plaintextModuli[0],
+            coefficientModuli: coefficientModuli,
+            errorStdDev: ErrorStdDev.stdDev32,
+            securityLevel: SecurityLevel.quantum128)
+    }
+}
+
+let contextCreationConfig32 = EncryptionParametersConfig(
+    polyDegree: 8192,
+    plaintextModulusBits: [18],
+    coefficientModulusBits: Array(repeating: 28, count: 5))
+let contextCreationConfig64 = EncryptionParametersConfig(
+    polyDegree: 8192,
+    plaintextModulusBits: [18],
+    coefficientModulusBits: Array(repeating: 33, count: 5))
+
+func contextInitBenchmark<Scheme: HeScheme>(_: Scheme.Type, config: EncryptionParametersConfig) -> () -> Void {
+    {
+        let benchmarkName = ["ContextInit", String(describing: Scheme.self), config.description].joined(separator: "/")
+        Benchmark(benchmarkName, configuration: benchmarkConfiguration) { benchmark in
+            let encryptionParameters = try EncryptionParameters<Scheme>(config: config)
+            benchmark.startMeasurement()
+            for _ in benchmark.scaledIterations {
+                try blackHole(_ = Context(encryptionParameters: encryptionParameters))
+            }
+        }
+    }
+}
+
 func encodeCoefficientBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
     {
         benchmark("EncodeCoefficient", Scheme.self) { benchmark in
@@ -124,6 +177,22 @@ func encodeCoefficientBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void 
             var plaintext: Scheme.CoeffPlaintext?
             for _ in benchmark.scaledIterations {
                 try blackHole(plaintext = benchmarkContext.context.encode(values: benchmarkContext.data,
+                                                                          format: .coefficient))
+            }
+            // Avoid warning about variable written to, but never read
+            withExtendedLifetime(plaintext) {}
+        }
+    }
+}
+
+func encodeSignedCoefficientBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
+    {
+        benchmark("EncodeSignedCoefficient", Scheme.self) { benchmark in
+            let benchmarkContext: RlweBenchmarkContext<Scheme> = try StaticRlweBenchmarkContext.getBenchmarkContext()
+            benchmark.startMeasurement()
+            var plaintext: Scheme.CoeffPlaintext?
+            for _ in benchmark.scaledIterations {
+                try blackHole(plaintext = benchmarkContext.context.encode(signedValues: benchmarkContext.signedData,
                                                                           format: .coefficient))
             }
             // Avoid warning about variable written to, but never read
@@ -148,6 +217,23 @@ func encodeSimdBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
     }
 }
 
+func encodeSignedSimdBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
+    {
+        benchmark("EncodeSignedSimd", Scheme.self) { benchmark in
+            let benchmarkContext: RlweBenchmarkContext<Scheme> = try StaticRlweBenchmarkContext.getBenchmarkContext()
+            benchmark.startMeasurement()
+            var plaintext: Scheme.CoeffPlaintext?
+            for _ in benchmark.scaledIterations {
+                try blackHole(plaintext = benchmarkContext.context.encode(
+                    signedValues: benchmarkContext.signedData,
+                    format: .simd))
+            }
+            // Avoid warning about variable written to, but never read
+            withExtendedLifetime(plaintext) {}
+        }
+    }
+}
+
 func decodeCoefficientBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
     {
         benchmark("DecodeCoefficient", Scheme.self) { benchmark in
@@ -161,6 +247,19 @@ func decodeCoefficientBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void 
     }
 }
 
+func decodeSignedCoefficientBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
+    {
+        benchmark("DecodeSignedCoefficient", Scheme.self) { benchmark in
+            let benchmarkContext: RlweBenchmarkContext<Scheme> = try StaticRlweBenchmarkContext.getBenchmarkContext()
+            benchmark.startMeasurement()
+            for _ in benchmark.scaledIterations {
+                try blackHole(
+                    benchmarkContext.coeffPlaintext.decode(format: .coefficient) as [Scheme.SignedScalar])
+            }
+        }
+    }
+}
+
 func decodeSimdBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
     {
         benchmark("DecodeSimd", Scheme.self) { benchmark in
@@ -169,6 +268,19 @@ func decodeSimdBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
             for _ in benchmark.scaledIterations {
                 try blackHole(
                     benchmarkContext.coeffPlaintext.decode(format: .simd) as [Scheme.Scalar])
+            }
+        }
+    }
+}
+
+func decodeSignedSimdBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
+    {
+        benchmark("DecodeSignedSimd", Scheme.self) { benchmark in
+            let benchmarkContext: RlweBenchmarkContext<Scheme> = try StaticRlweBenchmarkContext.getBenchmarkContext()
+            benchmark.startMeasurement()
+            for _ in benchmark.scaledIterations {
+                try blackHole(
+                    benchmarkContext.coeffPlaintext.decode(format: .simd) as [Scheme.SignedScalar])
             }
         }
     }
@@ -236,8 +348,7 @@ func noiseBudgetBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
             benchmark.startMeasurement()
             for _ in benchmark.scaledIterations {
                 try blackHole(
-                    benchmarkContext.ciphertext
-                        .noiseBudget(using: benchmarkContext.secretKey, variableTime: true))
+                    benchmarkContext.ciphertext.noiseBudget(using: benchmarkContext.secretKey, variableTime: true))
             }
         }
     }
@@ -282,6 +393,19 @@ func ciphertextMultiplyBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void
                 var ciphertext = benchmarkContext.ciphertext
                 let ciphertext2 = benchmarkContext.ciphertext
                 try blackHole(ciphertext *= ciphertext2)
+            }
+        }
+    }
+}
+
+func ciphertextMultiplyInversePowerOfXBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> () -> Void {
+    {
+        benchmark("CiphertextMultiplyInversePowerOfX", Scheme.self) { benchmark in
+            let benchmarkContext: RlweBenchmarkContext<Scheme> = try StaticRlweBenchmarkContext.getBenchmarkContext()
+            benchmark.startMeasurement()
+            var ciphertext = try benchmarkContext.ciphertext.convertToCoeffFormat()
+            for _ in benchmark.scaledIterations {
+                try blackHole(ciphertext.multiplyInversePowerOfX(power: ciphertext.context.degree / 2))
             }
         }
     }
@@ -561,16 +685,31 @@ func evaluationKeyDeserializeSeedBenchmark<Scheme: HeScheme>(_: Scheme.Type) -> 
 
 // swiftlint:disable:next closure_body_length
 nonisolated(unsafe) let benchmarks: () -> Void = {
-    // Encode/decode
-    encodeSimdBenchmark(Bfv<UInt32>.self)()
-    encodeSimdBenchmark(Bfv<UInt64>.self)()
-    decodeSimdBenchmark(Bfv<UInt32>.self)()
-    decodeSimdBenchmark(Bfv<UInt64>.self)()
+    // Context
+    contextInitBenchmark(Bfv<UInt32>.self, config: contextCreationConfig32)()
+    contextInitBenchmark(Bfv<UInt64>.self, config: contextCreationConfig64)()
 
+    // Encode
     encodeCoefficientBenchmark(Bfv<UInt32>.self)()
     encodeCoefficientBenchmark(Bfv<UInt64>.self)()
+    encodeSignedCoefficientBenchmark(Bfv<UInt32>.self)()
+    encodeSignedCoefficientBenchmark(Bfv<UInt64>.self)()
+
+    encodeSimdBenchmark(Bfv<UInt32>.self)()
+    encodeSimdBenchmark(Bfv<UInt64>.self)()
+    encodeSignedSimdBenchmark(Bfv<UInt32>.self)()
+    encodeSignedSimdBenchmark(Bfv<UInt64>.self)()
+
+    // Decode
     decodeCoefficientBenchmark(Bfv<UInt32>.self)()
     decodeCoefficientBenchmark(Bfv<UInt64>.self)()
+    decodeSignedCoefficientBenchmark(Bfv<UInt32>.self)()
+    decodeSignedCoefficientBenchmark(Bfv<UInt64>.self)()
+
+    decodeSimdBenchmark(Bfv<UInt32>.self)()
+    decodeSimdBenchmark(Bfv<UInt64>.self)()
+    decodeSignedSimdBenchmark(Bfv<UInt32>.self)()
+    decodeSignedSimdBenchmark(Bfv<UInt64>.self)()
 
     // Keygen
     generateSecretKeyBenchmark(Bfv<UInt32>.self)()
@@ -594,6 +733,9 @@ nonisolated(unsafe) let benchmarks: () -> Void = {
 
     ciphertextSubtractBenchmark(Bfv<UInt32>.self)()
     ciphertextSubtractBenchmark(Bfv<UInt64>.self)()
+
+    ciphertextMultiplyInversePowerOfXBenchmark(Bfv<UInt32>.self)()
+    ciphertextMultiplyInversePowerOfXBenchmark(Bfv<UInt64>.self)()
 
     ciphertextMultiplyBenchmark(Bfv<UInt32>.self)()
     ciphertextMultiplyBenchmark(Bfv<UInt64>.self)()
