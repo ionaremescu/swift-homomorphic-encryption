@@ -150,8 +150,8 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
         outputDatabase: "/path/to/output/database-SHARD_ID.bin",
         outputPirParameters: "path/to/output/pir-parameters-SHARD_ID.txtpb",
         rlweParameters: .n_4096_logq_27_28_28_logt_5,
-        outputEvaluationKeyConfig: "/path/to/output/evaluation-key-config.txtpb", 
-        shardId: "")
+        outputEvaluationKeyConfig: "/path/to/output/evaluation-key-config.txtpb",
+        disjoinedShardId: 0)
 
     let inputDatabase: String
     let outputDatabase: String
@@ -167,7 +167,7 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
     var useMaxSerializedBucketSize: Bool?
     var symmetricPirArguments: SymmetricPirArguments?
     var trialsPerShard: Int?
-    let shardId: String
+    let disjoinedShardId: Int?
 
     static func defaultJsonString() -> String {
         // swiftlint:disable:next force_try
@@ -201,7 +201,7 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
             algorithm: resolved.algorithm,
             keyCompression: PirKeyCompressionStrategy.noCompression,
             trialsPerShard: resolved.trialsPerShard,
-            shardId: resolved.shardId)
+            disjoinedShardId: resolved.disjoinedShardId)
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -250,8 +250,8 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
             keyCompression: keyCompression ?? .noCompression,
             useMaxSerializedBucketSize: useMaxSerializedBucketSize ?? false,
             symmetricPirConfig: symmetricPirArguments?.resolve(),
-            shardId: shardId,
-            trialsPerShard: trialsPerShard ?? 1)
+            trialsPerShard: trialsPerShard ?? 1,
+            disjoinedShardId: disjoinedShardId ?? 0 )
     }
 }
 
@@ -270,7 +270,7 @@ struct ResolvedArguments: CustomStringConvertible, Encodable {
     let useMaxSerializedBucketSize: Bool
     let symmetricPirConfig: SymmetricPirConfig?
     let trialsPerShard: Int
-    let shardId: String
+    let disjoinedShardId: Int
 
     var description: String {
         let encoder = JSONEncoder()
@@ -306,8 +306,8 @@ struct ResolvedArguments: CustomStringConvertible, Encodable {
         keyCompression: PirKeyCompressionStrategy,
         useMaxSerializedBucketSize: Bool,
         symmetricPirConfig: SymmetricPirConfig?,
-        shardId: String,
-        trialsPerShard: Int) throws
+        trialsPerShard: Int,
+        disjoinedShardId: Int) throws
     {
         self.inputDatabase = inputDatabase
         self.outputDatabase = outputDatabase
@@ -322,7 +322,7 @@ struct ResolvedArguments: CustomStringConvertible, Encodable {
         self.useMaxSerializedBucketSize = useMaxSerializedBucketSize
         self.symmetricPirConfig = symmetricPirConfig
         self.trialsPerShard = trialsPerShard
-        self.shardId = shardId
+        self.disjoinedShardId = disjoinedShardId
 
         try validate()
     }
@@ -446,11 +446,13 @@ struct ProcessDatabase: AsyncParsableCommand {
     {
         var selectedShardID: String;
         
-        if (config.shardId != "") {
-            selectedShardID = config.shardId;
+        if (config.disjoinedShardId>0 ) {
+            selectedShardID = String(config.disjoinedShardId);
         }
-        else
-        {selectedShardID = shardID}
+        else { 
+            selectedShardID = shardID 
+        }
+        
         
         var logger = ProcessDatabase.logger
         logger[metadataKey: "shardID"] = .string(selectedShardID)
