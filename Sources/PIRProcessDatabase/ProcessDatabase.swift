@@ -150,7 +150,8 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
         outputDatabase: "/path/to/output/database-SHARD_ID.bin",
         outputPirParameters: "path/to/output/pir-parameters-SHARD_ID.txtpb",
         rlweParameters: .n_4096_logq_27_28_28_logt_5,
-        outputEvaluationKeyConfig: "/path/to/output/evaluation-key-config.txtpb")
+        outputEvaluationKeyConfig: "/path/to/output/evaluation-key-config.txtpb", 
+        shardId: "")
 
     let inputDatabase: String
     let outputDatabase: String
@@ -166,6 +167,7 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
     var useMaxSerializedBucketSize: Bool?
     var symmetricPirArguments: SymmetricPirArguments?
     var trialsPerShard: Int?
+    let shardId: String
 
     static func defaultJsonString() -> String {
         // swiftlint:disable:next force_try
@@ -198,7 +200,8 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
             cuckooTableArguments: cuckooTableArguments,
             algorithm: resolved.algorithm,
             keyCompression: PirKeyCompressionStrategy.noCompression,
-            trialsPerShard: resolved.trialsPerShard)
+            trialsPerShard: resolved.trialsPerShard,
+            shardId: resolved.shardId)
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
@@ -247,6 +250,7 @@ struct Arguments: Codable, Equatable, Hashable, Sendable {
             keyCompression: keyCompression ?? .noCompression,
             useMaxSerializedBucketSize: useMaxSerializedBucketSize ?? false,
             symmetricPirConfig: symmetricPirArguments?.resolve(),
+            shardId: shardId,
             trialsPerShard: trialsPerShard ?? 1)
     }
 }
@@ -266,6 +270,7 @@ struct ResolvedArguments: CustomStringConvertible, Encodable {
     let useMaxSerializedBucketSize: Bool
     let symmetricPirConfig: SymmetricPirConfig?
     let trialsPerShard: Int
+    let shardId: String
 
     var description: String {
         let encoder = JSONEncoder()
@@ -301,6 +306,7 @@ struct ResolvedArguments: CustomStringConvertible, Encodable {
         keyCompression: PirKeyCompressionStrategy,
         useMaxSerializedBucketSize: Bool,
         symmetricPirConfig: SymmetricPirConfig?,
+        shardId: String,
         trialsPerShard: Int) throws
     {
         self.inputDatabase = inputDatabase
@@ -316,6 +322,7 @@ struct ResolvedArguments: CustomStringConvertible, Encodable {
         self.useMaxSerializedBucketSize = useMaxSerializedBucketSize
         self.symmetricPirConfig = symmetricPirConfig
         self.trialsPerShard = trialsPerShard
+        self.shardId = shardId
 
         try validate()
     }
@@ -436,8 +443,16 @@ struct ProcessDatabase: AsyncParsableCommand {
         context: Context<Scheme>,
         processArgs: ProcessKeywordDatabase.Arguments<Scheme>) async throws -> EvaluationKeyConfig
     {
+        var selectedShardID: String;
+        
+        if (config.shardId != "") {
+            selectedShardID = config.shardId;
+        }
+        else
+        {selectedShardID = shardID}
+        
         var logger = ProcessDatabase.logger
-        logger[metadataKey: "shardID"] = .string(shardID)
+        logger[metadataKey: "shardID"] = .string(selectedShardID)
 
         func logEvent(event: ProcessKeywordDatabase.ProcessShardEvent) throws {
             switch event {
@@ -481,14 +496,14 @@ struct ProcessDatabase: AsyncParsableCommand {
 
         let outputDatabaseFilename = config.outputDatabase.replacingOccurrences(
             of: "SHARD_ID",
-            with: String(shardID))
+            with: String(selectedShardID))
         try processed.database.save(to: outputDatabaseFilename)
         logger.info("Saved shard to \(outputDatabaseFilename)")
 
         let shardPirParameters = try processed.proto(context: context)
         let outputParametersFilename = config.outputPirParameters.replacingOccurrences(
             of: "SHARD_ID",
-            with: String(shardID))
+            with: String(selectedShardID))
         try shardPirParameters.save(to: outputParametersFilename)
         logger.info("Saved shard PIR parameters to \(outputParametersFilename)")
 
